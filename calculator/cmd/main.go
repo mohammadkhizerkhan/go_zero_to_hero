@@ -11,7 +11,7 @@ import (
 
 func main() {
 	mylogger.Info("starting calculator")
-	fmt.Println("2 + 3 = ", calc.Add(2, 3))
+	fmt.Println("2 + 3 =", calc.Add(2, 3))
 	fmt.Println(uuid.NewV7())
 	structscomposition1.TestNestedStructs()
 }
