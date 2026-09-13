@@ -5,6 +5,9 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/mohammadkhizerkhan/go_zero_to_hero/calculator/calc"
+
+	// "github.com/mohammadkhizerkhan/go_zero_to_hero/calculator/concurrency"
+	"github.com/mohammadkhizerkhan/go_zero_to_hero/calculator/concurrency/concurrency_roadmap"
 	errorExample "github.com/mohammadkhizerkhan/go_zero_to_hero/calculator/error"
 	interfaceExample "github.com/mohammadkhizerkhan/go_zero_to_hero/calculator/interface_example"
 	structscomposition1 "github.com/mohammadkhizerkhan/go_zero_to_hero/calculator/structs_composition_1"
@@ -16,7 +19,11 @@ func main() {
 	fmt.Println("2 + 3 =", calc.Add(2, 3))
 	fmt.Println(uuid.NewV7())
 	structscomposition1.TestNestedStructs()
+
+	// Interface examples
 	interfaceExample.TestInterfaceExamples()
+
+	// Error handling examples
 	errorExample.WrapErrorExample()
 	userName, err := errorExample.GetUserNameExample(1)
 	if err != nil {
@@ -26,4 +33,25 @@ func main() {
 	}
 	errorExample.CheckIfBusinessValidationError(&errorExample.BusinessValidationError{Message: "Test error", Code: 1002})
 	errorExample.TestPanic()
+
+	fmt.Println("======================== go routine examples =============================")
+	// simple go routine example
+
+	// concurrency.SimpleGoRoutine()
+	// concurrency.SimpleGoRoutineWithTimer()
+	// concurrency.WaitGroupExample()
+	// concurrency.WithoutWaitGroupExample()
+	// concurrency.SimulateRaceCondition()
+	// concurrency.SimulateRaceConditionWithMutex()
+	// concurrency.SimulateChannelDataPassing()
+	// concurrency.SimulateChannelDataPassingUsingWorkers()
+	// concurrency.SimpleBufferedChannelExample()
+	// concurrency.ReadFromMultipleChannelsUsingSelect()
+	// concurrency.ReadFromMultipleChannelsUsingForever()
+	// concurrency.WorkerPoolExample()
+	// concurrency.FanOutFanInExample()
+	// concurrency_roadmap.Spawner()
+	// concurrency_roadmap.SpawnerWithoutGoroutine()
+	// concurrency_roadmap.Heartbeat()
+	concurrency_roadmap.TestPingPong()
 }
