@@ -7,7 +7,7 @@ import (
 	"github.com/mohammadkhizerkhan/go_zero_to_hero/calculator/calc"
 
 	// "github.com/mohammadkhizerkhan/go_zero_to_hero/calculator/concurrency"
-	"github.com/mohammadkhizerkhan/go_zero_to_hero/calculator/concurrency/concurrency_roadmap"
+	// "github.com/mohammadkhizerkhan/go_zero_to_hero/calculator/concurrency/concurrency_roadmap"
 	errorExample "github.com/mohammadkhizerkhan/go_zero_to_hero/calculator/error"
 	interfaceExample "github.com/mohammadkhizerkhan/go_zero_to_hero/calculator/interface_example"
 	structscomposition1 "github.com/mohammadkhizerkhan/go_zero_to_hero/calculator/structs_composition_1"
@@ -53,5 +53,5 @@ func main() {
 	// concurrency_roadmap.Spawner()
 	// concurrency_roadmap.SpawnerWithoutGoroutine()
 	// concurrency_roadmap.Heartbeat()
-	concurrency_roadmap.TestPingPong()
+	// concurrency_roadmap.TestPingPong()
 }
