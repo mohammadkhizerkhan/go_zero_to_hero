@@ -99,3 +99,73 @@ We concatenate 7 words: `[]string{"go", "zero", "to", "hero", "performance", "be
   - **Zero-Copy Conversion**: Unlike `bytes.Buffer.String()`, `sb.String()` uses `unsafe.Pointer` internally to return the string directly from the builder's internal byte slice without making an extra copy.
 - **Result**: Exactly **1 allocation** (the pre-allocated 64 bytes) and **64 B/op**, taking ~1/4th the time of `+`.
 - **When to use**: High-performance string concatenation and dynamic text generation in Go.
+
+---
+
+## 5. CPU Profiling with `go tool pprof`
+
+CPU profiling tracks where your Go application spends execution time by sampling goroutine call stacks at 100 Hz.
+
+### Practical Steps:
+1. **Generate Profile**:
+   ```bash
+   go test -run=^$ -bench=BenchmarkCPUSlowFunction -cpuprofile=cpu.pprof ./benchmark
+   ```
+2. **Interactive CLI Exploration**:
+   ```bash
+   go tool pprof cpu.pprof
+   ```
+   - Type `top10` to view the top 10 CPU-consuming functions.
+   - Type `list slowCPUFunction` to view line-by-line nanosecond costs.
+   - Type `exit` to quit.
+3. **Web UI & Flame Graph**:
+   ```bash
+   go tool pprof -http=:8080 cpu.pprof
+   ```
+
+---
+
+## 6. Memory Profiling & Allocation Analysis
+
+Identify garbage collection bottlenecks and memory leaks with heap profiling.
+
+### The 4 Memory Profile Modes:
+| Flag / Option | Description | Use Case |
+| :--- | :--- | :--- |
+| `-alloc_space` | Total bytes allocated (including GC'd) | Finding garbage generation hotspots |
+| `-alloc_objects` | Total number of objects allocated | Reducing GC pressure |
+| `-inuse_space` | Current bytes occupied in RAM | Debugging memory leaks |
+| `-inuse_objects` | Current live objects in RAM | Debugging object leaks |
+
+### Practical Steps:
+1. **Generate Heap Profile**:
+   ```bash
+   go test -run=^$ -bench=BenchmarkMemoryGarbage -benchmem -memprofile=mem.pprof ./benchmark
+   ```
+2. **Find Garbage Source Lines**:
+   ```bash
+   go tool pprof -alloc_space mem.pprof
+   (pprof) top
+   (pprof) list generateGarbage
+   ```
+3. **Launch Web UI**:
+   ```bash
+   go tool pprof -http=:8080 -alloc_space mem.pprof
+   ```
+
+---
+
+## 7. Race Detector in CI (`-race` & Makefile)
+
+The Go Race Detector uses compile-time code instrumentation to detect simultaneous read/write access to shared variables.
+
+Run all tests with the race detector enabled via [`calculator/Makefile`](file:///home/khizerkhan/go_zero_to_hero/calculator/Makefile):
+```bash
+make test-race
+```
+
+Or run the full CI suite:
+```bash
+make ci
+```
+

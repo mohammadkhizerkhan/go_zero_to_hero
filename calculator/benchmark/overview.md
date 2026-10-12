@@ -235,46 +235,301 @@ func BenchmarkParallelCounter(b *testing.B) {
 
 ---
 
+### K.5 CPU Profiling: Profiling Slow Functions with `pprof`
+
+**Goal**: Pinpoint CPU bottlenecks and hot functions using Go's sampling CPU profiler and visualize them with `go tool pprof`.
+
+#### How It Works:
+The Go CPU profiler interrupts program execution 100 times per second (100 Hz). On every interrupt, it records the call stack of the currently running goroutine. Functions that appear most frequently across samples consume the most CPU cycles.
+
+```go
+// Code reference: benchmark/profile_demo_test.go
+func slowCPUFunction(iterations int) [32]byte {
+	var hash [32]byte
+	data := []byte("go_zero_to_hero_benchmark_seed_data")
+	for i := 0; i < iterations; i++ {
+		h := sha256.New()
+		h.Write(data)
+		h.Write(hash[:])
+		copy(hash[:], h.Sum(nil))
+	}
+	return hash
+}
+
+func BenchmarkCPUSlowFunction(b *testing.B) {
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		globalHashSink = slowCPUFunction(100)
+	}
+}
+```
+
+#### Step-by-Step Usage:
+
+1. **Generate the CPU Profile**:
+   ```bash
+   go test -run=^$ -bench=BenchmarkCPUSlowFunction -cpuprofile=cpu.pprof ./benchmark
+   ```
+
+2. **Interactive CLI Analysis**:
+   ```bash
+   go tool pprof cpu.pprof
+   ```
+   Key interactive commands inside `pprof`:
+   - `top10`: Lists the top 10 functions by CPU time consumption.
+   - `top -cum`: Lists functions sorted by cumulative time (including functions they call).
+   - `list slowCPUFunction`: Shows line-by-line CPU time breakdown inside `slowCPUFunction`.
+   - `web`: Generates an SVG call graph and opens it in your browser (requires `graphviz`).
+   - `exit` or `quit`: Exits the interactive pprof shell.
+
+3. **Visual Browser & Flame Graph Interface**:
+   ```bash
+   go tool pprof -http=:8080 cpu.pprof
+   ```
+   Open `http://localhost:8080` in your browser. Use the **VIEW** dropdown menu to switch between:
+   - **Top**: Tabular overview of hot functions.
+   - **Graph**: Directed acyclic call graph with edge weights representing execution time.
+   - **Flame Graph**: Interactive hierarchical visualization where bar width represents execution time.
+   - **Source**: Annotated Go source code showing line-by-line time expenditure.
+
+---
+
+### K.6 Memory Profiling: Identifying Garbage & Heap Allocations
+
+**Goal**: Trace where short-lived temporary objects (garbage) and high heap allocations occur to eliminate GC pauses.
+
+#### How It Works:
+Go's memory profiler records heap allocations by sampling 1 in every 512 KB allocated. It lets you inspect memory in four distinct modes:
+- **`alloc_space`**: Total number of bytes allocated (including garbage collected memory). Ideal for reducing GC pressure.
+- **`alloc_objects`**: Total count of allocated heap objects.
+- **`inuse_space`**: Number of bytes currently alive on the heap. Ideal for tracking memory leaks.
+- **`inuse_objects`**: Number of objects currently alive on the heap.
+
+```go
+// Code reference: benchmark/profile_demo_test.go
+// 1. Garbage generator (350 allocs/op, 82 KB/op)
+func generateGarbage(n int) string {
+	var result string
+	for i := 0; i < n; i++ {
+		temp := fmt.Sprintf("item-%d-val:%s", i, strconv.Itoa(i*2))
+		result += temp + ","
+	}
+	return result
+}
+
+// 2. Low-allocation optimized (51 allocs/op, 2.2 KB/op)
+func generateOptimized(n int) string {
+	var sb strings.Builder
+	sb.Grow(n * 20) // Pre-allocate buffer
+	for i := 0; i < n; i++ {
+		sb.WriteString("item-")
+		sb.WriteString(strconv.Itoa(i))
+		sb.WriteString("-val:")
+		sb.WriteString(strconv.Itoa(i * 2))
+		sb.WriteString(",")
+	}
+	return sb.String()
+}
+```
+
+#### Step-by-Step Usage:
+
+1. **Generate the Memory Profile**:
+   ```bash
+   go test -run=^$ -bench=BenchmarkMemoryGarbage -benchmem -memprofile=mem.pprof ./benchmark
+   ```
+
+2. **Inspect Cumulative Allocated Space (Garbage)**:
+   ```bash
+   go tool pprof -alloc_space mem.pprof
+   ```
+   Inside pprof:
+   ```text
+   (pprof) top
+   (pprof) list generateGarbage
+   ```
+   The `list` command reveals the exact lines responsible for heap escaping:
+   ```text
+   ROUTINE ======================== generateGarbage in .../profile_demo_test.go
+     80.75MB    80.75MB (flat, cum)   100% of Total
+           .          .     43: func generateGarbage(n int) string {
+           .          .     44: 	var result string
+           .          .     45: 	for i := 0; i < n; i++ {
+     38.25MB    38.25MB     46: 		temp := fmt.Sprintf("item-%d-val:%s", i, strconv.Itoa(i*2))
+     42.50MB    42.50MB     47: 		result += temp + ","
+           .          .     48: 	}
+           .          .     49: 	return result
+   ```
+
+3. **Launch Web UI**:
+   ```bash
+   go tool pprof -http=:8080 -alloc_space mem.pprof
+   ```
+
+---
+
+#### explaination
+ ### 1. The Header: Function Summary
+
+    ROUTINE ======================== github.com/.../benchmark.generateGarbage in .../profile_demo_test.go
+        2.75GB     2.81GB (flat, cum) 99.91% of Total
+
+   Metric              │ Value              │ Meaning
+  ─────────────────────┼────────────────────┼────────────────────────────────────────────────────────────────────────────────────────────────────────────
+   flat                │ 2.75GB             │ Memory allocated directly by this function itself (not counting calls to external functions).
+   cum (cumulative)    │ 2.81GB             │ Total memory allocated by this function PLUS all functions called by it (e.g., fmt.Sprintf, strconv.Itoa).
+   % of Total          │ 99.91%             │ This single function is responsible for virtually all allocations during the entire benchmark run.
+  ──────
+  ### 2. Line-by-Line Breakdown
+
+             .          .     46:func generateGarbage(n int) string {
+             .          .     47:   var result string
+             .          .     48:   for i := 0; i < n; i++ {
+             .          .     49:           // fmt.Sprintf and string concatenation create multiple allocations per iteration
+       49.50MB   110.50MB     50:           temp := fmt.Sprintf("item-%d-val:%s", i, strconv.Itoa(i*2))
+        2.70GB     2.70GB     51:           result += temp + ","
+             .          .     52:   }
+             .          .     53:   return result
+             .          .     54:}
+
+  The two columns on the left correspond to:
+
+  • Column 1 (flat): Memory allocated on this exact line.
+  • Column 2 (cum): Memory allocated on this line including inside any helper functions called on this line.
+  • Dots (.): Zero heap allocations occurred on that line.
+  ──────
+  ### 3. Analyzing the Two Culprit Lines
+
+  #### Line 50: temp := fmt.Sprintf(...)
+
+       49.50MB   110.50MB     50:           temp := fmt.Sprintf("item-%d-val:%s", i, strconv.Itoa(i*2))
+
+  • flat: 49.50MB: generateGarbage allocated 49.50 MB just setting up the arguments for fmt.Sprintf (boxing the integer and string interfaces into
+  interface{} / any).
+  • cum: 110.50MB: Total allocations grew to 110.50 MB once fmt.Sprintf and strconv.Itoa created internal reflection buffers and intermediate return
+  strings.
+  ──────
+  #### Line 51: result += temp + "," (The Primary Bottleneck!)
+
+        2.70GB     2.70GB     51:           result += temp + ","
+
+  • flat: 2.70GB & cum: 2.70GB: Consumed over 96% of all memory allocations!
+  • Why this happened: In Go, strings are immutable byte arrays. Each time result += ... executes inside a loop:
+      1. Go cannot modify result in place.
+      2. It must allocate a brand new slice on the heap.
+      3. It copies all previous characters into the new slice, appends temp and ",", and discards the old slice for the Garbage Collector.
+      4. With N = 100 across thousands of benchmark iterations, this causes quadratic (O(N²)) allocation pressure totaling 2.70 GB of discarded garbage.
+
+  ──────
+  ### 4. Summary: What Action to Take
+
+  When you see a profile like this:
+
+  1. Target the largest flat line first: Line 51 (+= string concatenation) is responsible for 2.70 GB of garbage.
+  2. Fix: Replace result += ... with a pre-allocated strings.Builder via sb.Grow(size) to drop allocations from 2.81 GB down to just a few kilobytes.
+
+### K.7 Race Detection & Continuous Integration (`-race` & Makefile)
+
+**Goal**: Prevent data races from reaching production by integrating `-race` enabled test suites into Makefiles and CI pipelines.
+
+#### How It Works:
+The Go Race Detector instruments memory reads and writes during compilation (via ThreadSanitizer v2). It tracks synchronization events and detects when two goroutines access the same variable concurrently where at least one access is a write without synchronization.
+
+#### Performance Trade-offs:
+- **CPU Overhead**: 2x – 10x slower execution.
+- **Memory Overhead**: 5x – 20x higher RAM consumption.
+- **Best Practice**: Always enable `-race` in local development and automated CI pipelines, but **never** compile production releases with `-race`.
+
+#### Makefile Automation:
+Located at [`calculator/Makefile`](file:///home/khizerkhan/go_zero_to_hero/calculator/Makefile):
+
+```makefile
+.PHONY: help test test-race bench profile-cpu profile-mem pprof-cpu-cli pprof-mem-cli pprof-cpu-web pprof-mem-web clean ci
+
+test-race: ## Run tests with the Go race detector enabled (-race)
+	@echo "==> Running tests with Race Detector (-race)..."
+	go test -race ./sync/... ./pointers_learning/... ./structs_composition_1/...
+
+bench: ## Run all benchmarks with memory allocation metrics
+	@echo "==> Running benchmarks..."
+	go test -run=^$$ -bench=. -benchmem ./benchmark/...
+
+profile-cpu: ## Profile a slow CPU function and generate cpu.pprof
+	go test -run=^$$ -bench=BenchmarkCPUSlowFunction -cpuprofile=cpu.pprof ./benchmark/...
+
+profile-mem: ## Profile memory allocations and generate mem.pprof
+	go test -run=^$$ -bench=BenchmarkMemory -benchmem -memprofile=mem.pprof ./benchmark/...
+
+ci: test-race bench ## CI target for automated pipelines
+	@echo "==> CI pipeline checks passed successfully!"
+```
+
+#### GitHub Actions CI Example (`.github/workflows/ci.yml`):
+```yaml
+name: Go CI
+on: [push, pull_request]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+      - name: Run Tests with Race Detector
+        run: |
+          cd calculator
+          make test-race
+      - name: Run Benchmarks
+        run: |
+          cd calculator
+          make bench
+```
+
+---
+
 ## ⚡ CLI Commands Cheatsheet
 
 ### 1. Run All Benchmarks
-
 ```bash
 go test -bench=. ./benchmark/...
 ```
 
 ### 2. Include Memory Allocation Statistics
-
 ```bash
 go test -bench=. -benchmem ./benchmark/...
 ```
 
 ### 3. Run a Specific Benchmark by Regex Pattern
-
 ```bash
 go test -bench=BenchmarkConcatBuilder -benchmem ./benchmark/...
 ```
 
 ### 4. Increase Benchmark Time & Iteration Count
-
 Increase accuracy by running each benchmark for 3 seconds across 5 rounds:
-
 ```bash
 go test -bench=. -benchtime=3s -count=5 ./benchmark/...
 ```
 
 ### 5. Generate CPU and Memory Profiles
-
-Generate pprof profiling artifacts during benchmark runs:
-
 ```bash
 go test -bench=. -cpuprofile=cpu.pprof -memprofile=mem.pprof ./benchmark/...
 ```
 
-Analyze with Go pprof tool:
-
+### 6. Interactive & Web UI Profiler
 ```bash
+# Web UI
 go tool pprof -http=:8080 cpu.pprof
+go tool pprof -http=:8080 -alloc_space mem.pprof
+
+# CLI
+go tool pprof cpu.pprof
+go tool pprof -alloc_space mem.pprof
+```
+
+### 7. Run Race Detection
+```bash
+go test -race ./...
 ```
 
 ---
@@ -288,3 +543,29 @@ go tool pprof -http=:8080 cpu.pprof
 | **Passing Pointers for Large Structs (>128 B)** | ~2x – 4x faster | Eliminates stack/heap copy overhead | Heavy config/data payload structs |
 | **`sync/atomic` vs `sync.Mutex`** | ~3x – 5x faster | Lock-free CPU instruction level synchronization | Numeric counters, state flags, atomic pointers |
 | **Object Pooling with `sync.Pool`** | ~2x – 4x faster | Drastically reduces GC overhead | High-frequency short-lived byte buffers / objects |
+
+---
+
+## 🎯 Hands-On Assignments & Solutions
+
+1. **Concat Benchmark**: Benchmark `+` vs `bytes.Buffer` vs `strings.Builder`.
+   - File: [`calculator/benchmark/benchmark_test.go`](file:///home/khizerkhan/go_zero_to_hero/calculator/benchmark/benchmark_test.go)
+   - Command: `go test -bench=BenchmarkConcat -benchmem ./benchmark`
+
+2. **Slice Pre-allocation**: Benchmark dynamic `append` vs `make([]T, 0, cap)`.
+   - File: [`calculator/benchmark/pre_allocation_test.go`](file:///home/khizerkhan/go_zero_to_hero/calculator/benchmark/pre_allocation_test.go)
+   - Command: `go test -bench=BenchmarkSlice -benchmem ./benchmark`
+
+3. **CPU Profile**: Profile a slow function and visualize with `go tool pprof`.
+   - File: [`calculator/benchmark/profile_demo_test.go`](file:///home/khizerkhan/go_zero_to_hero/calculator/benchmark/profile_demo_test.go)
+   - Command: `make profile-cpu` or `go test -run=^$ -bench=BenchmarkCPUSlowFunction -cpuprofile=cpu.pprof ./benchmark`
+   - Visualize: `make pprof-cpu-web` or `go tool pprof -http=:8080 cpu.pprof`
+
+4. **Memory Profile**: Identify where a function is generating garbage allocations.
+   - File: [`calculator/benchmark/profile_demo_test.go`](file:///home/khizerkhan/go_zero_to_hero/calculator/benchmark/profile_demo_test.go)
+   - Command: `make profile-mem` or `go test -run=^$ -bench=BenchmarkMemoryGarbage -benchmem -memprofile=mem.pprof ./benchmark`
+   - Analyze: `make pprof-mem-cli` or `go tool pprof -alloc_space mem.pprof` (use `top` and `list generateGarbage`)
+
+5. **Race CI**: Makefile running tests with `-race` enabled.
+   - File: [`calculator/Makefile`](file:///home/khizerkhan/go_zero_to_hero/calculator/Makefile)
+   - Command: `make test-race` or `make ci`
